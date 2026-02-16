@@ -2,6 +2,7 @@ const TILE = 32;
 const MAP_W = 20;
 const MAP_H = 15;
 const SPEED = 3;
+const BUBBLE_DURATION = 5000; // ms
 
 // --- Sprites ---
 const SPRITE_NAMES = [
@@ -13,9 +14,8 @@ const SPRITE_NAMES = [
   "Archer-Green",
 ];
 const FRAME_SIZE = 32;
-// Rows in sprite sheet: 0=S, 1=SW, 2=W, 3=NW, 4=N, 5=NE, 6=E, 7=SE
 const DIR_ROW: Record<string, number> = { down: 0, right: 2, up: 4, left: 6 };
-const WALK_FRAMES = 4; // first 4 columns = walk cycle
+const WALK_FRAMES = 4;
 
 // Load all sprite sheets
 const spriteImages = new Map<string, HTMLImageElement>();
@@ -33,7 +33,6 @@ for (const name of ["Grass1", "Grass2", "Dirt", "Tree"]) {
   tileImages[name] = img;
 }
 
-// Assign a sprite to a player based on their ID
 function spriteForId(id: string): string {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
@@ -54,7 +53,6 @@ const rooms = [
   { id: "room-c", name: "休憩室", x: 2, y: 9, w: 5, h: 4 },
 ];
 
-// Add room walls
 for (const room of rooms) {
   for (let ry = room.y; ry < room.y + room.h; ry++) {
     for (let rx = room.x; rx < room.x + room.w; rx++) {
@@ -81,20 +79,74 @@ let animFrame = 0;
 let animTick = 0;
 let currentRoom: string | null = null;
 
+// --- Chat ---
+let chatMode = false;
+let chatInput = "";
+type Bubble = { text: string; expires: number };
+const bubbles = new Map<string, Bubble>(); // keyed by player id
+
 type OtherPlayer = { x: number; y: number; name: string; facing: string; walking: boolean };
 const others = new Map<string, OtherPlayer>();
 
 // --- Input ---
 const keys = new Set<string>();
-window.addEventListener("keydown", (e) => keys.add(e.key));
-window.addEventListener("keyup", (e) => keys.delete(e.key));
+const chatEl = document.getElementById("chat-input") as HTMLInputElement;
+let composing = false;
+
+chatEl.addEventListener("compositionstart", () => { composing = true; });
+chatEl.addEventListener("compositionend", () => { composing = false; });
+
+chatEl.addEventListener("keydown", (e) => {
+  if (composing) return; // IME 変換中は無視
+  if (e.key === "Escape") {
+    chatMode = false;
+    chatInput = "";
+    chatEl.value = "";
+    chatEl.blur();
+    e.preventDefault();
+  } else if (e.key === "Enter") {
+    const text = chatEl.value.trim();
+    if (text) {
+      sendChat(text);
+      bubbles.set(myId, { text, expires: Date.now() + BUBBLE_DURATION });
+    }
+    chatMode = false;
+    chatInput = "";
+    chatEl.value = "";
+    chatEl.blur();
+    e.preventDefault();
+  }
+});
+
+chatEl.addEventListener("input", () => {
+  chatInput = chatEl.value;
+});
+
+window.addEventListener("keydown", (e) => {
+  if (chatMode) return;
+
+  if (e.key === "Enter") {
+    chatMode = true;
+    chatInput = "";
+    chatEl.value = "";
+    chatEl.focus();
+    e.preventDefault();
+    return;
+  }
+
+  keys.add(e.key);
+});
+
+window.addEventListener("keyup", (e) => {
+  keys.delete(e.key);
+});
 
 // --- Canvas ---
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 canvas.width = MAP_W * TILE;
 canvas.height = MAP_H * TILE;
 const ctx = canvas.getContext("2d")!;
-ctx.imageSmoothingEnabled = false; // Keep pixel art crisp
+ctx.imageSmoothingEnabled = false;
 
 // --- WebSocket ---
 function connect() {
@@ -124,6 +176,11 @@ function connect() {
 
     if (msg.type === "leave") {
       others.delete(msg.id);
+      bubbles.delete(msg.id);
+    }
+
+    if (msg.type === "chat") {
+      bubbles.set(msg.id, { text: msg.text, expires: Date.now() + BUBBLE_DURATION });
     }
   };
 
@@ -137,7 +194,6 @@ function connect() {
 
 let ws = connect();
 
-// Send position when moving
 let lastSentX = px;
 let lastSentY = py;
 
@@ -147,6 +203,11 @@ function sendPosition() {
   lastSentX = px;
   lastSentY = py;
   ws.send(JSON.stringify({ type: "move", x: px, y: py, name: "Player", facing, walking }));
+}
+
+function sendChat(text: string) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "chat", text }));
 }
 
 // --- Collision check ---
@@ -181,7 +242,6 @@ function detectRoom(x: number, y: number): string | null {
 function drawSprite(spriteName: string, x: number, y: number, dir: string, isWalking: boolean, frame: number) {
   const img = spriteImages.get(spriteName);
   if (!img || !img.complete) {
-    // Fallback to colored rectangle
     ctx.fillStyle = spriteName === mySprite ? "#f0c040" : "#40a0f0";
     ctx.fillRect(x + 4, y + 4, TILE - 8, TILE - 8);
     return;
@@ -189,7 +249,7 @@ function drawSprite(spriteName: string, x: number, y: number, dir: string, isWal
   const row = DIR_ROW[dir] ?? 0;
   const col = isWalking ? frame % WALK_FRAMES : 0;
   const drawSize = TILE * 2;
-  const offset = (TILE - drawSize) / 2; // center on tile
+  const offset = (TILE - drawSize) / 2;
   ctx.drawImage(
     img,
     col * FRAME_SIZE, row * FRAME_SIZE, FRAME_SIZE, FRAME_SIZE,
@@ -197,9 +257,57 @@ function drawSprite(spriteName: string, x: number, y: number, dir: string, isWal
   );
 }
 
+// --- Draw speech bubble ---
+function drawBubble(text: string, x: number, y: number) {
+  ctx.font = "11px sans-serif";
+  const metrics = ctx.measureText(text);
+  const tw = metrics.width;
+  const padX = 6;
+  const padY = 4;
+  const bw = tw + padX * 2;
+  const bh = 16 + padY * 2;
+  const bx = x + TILE / 2 - bw / 2;
+  const by = y - TILE - bh;
+
+  // Bubble background
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 4);
+  ctx.fill();
+  ctx.strokeStyle = "#333";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Tail
+  const tailX = x + TILE / 2;
+  ctx.fillStyle = "#fff";
+  ctx.beginPath();
+  ctx.moveTo(tailX - 4, by + bh);
+  ctx.lineTo(tailX, by + bh + 6);
+  ctx.lineTo(tailX + 4, by + bh);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(tailX - 4, by + bh);
+  ctx.lineTo(tailX, by + bh + 6);
+  ctx.lineTo(tailX + 4, by + bh);
+  ctx.strokeStyle = "#333";
+  ctx.stroke();
+
+  // Text
+  ctx.fillStyle = "#222";
+  ctx.textAlign = "center";
+  ctx.fillText(text, x + TILE / 2, by + padY + 12);
+}
+
 // --- Render ---
 function draw() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const now = Date.now();
+
+  // Expire old bubbles
+  for (const [id, bubble] of bubbles) {
+    if (now >= bubble.expires) bubbles.delete(id);
+  }
 
   // Tiles
   for (let y = 0; y < MAP_H; y++) {
@@ -233,6 +341,8 @@ function draw() {
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(other.name, other.x + TILE / 2, other.y - TILE / 2 - 2);
+    const bubble = bubbles.get(id);
+    if (bubble) drawBubble(bubble.text, other.x, other.y);
   }
 
   // Local player
@@ -241,32 +351,49 @@ function draw() {
   ctx.font = "11px sans-serif";
   ctx.textAlign = "center";
   ctx.fillText("You", px + TILE / 2, py - TILE / 2 - 2);
+  const myBubble = bubbles.get(myId);
+  if (myBubble) drawBubble(myBubble.text, px, py);
+
+  // Chat input overlay
+  if (chatMode) {
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    ctx.fillRect(0, canvas.height - 32, canvas.width, 32);
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText(`> ${chatInput}_`, 8, canvas.height - 10);
+  }
 
   // Room status
-  ctx.fillStyle = "#fff";
-  ctx.font = "14px sans-serif";
-  ctx.textAlign = "left";
-  const roomName = rooms.find((r) => r.id === currentRoom)?.name;
-  ctx.fillText(roomName ? `📍 ${roomName}` : "廊下", 8, canvas.height - 8);
+  if (!chatMode) {
+    ctx.fillStyle = "#fff";
+    ctx.font = "14px sans-serif";
+    ctx.textAlign = "left";
+    const roomName = rooms.find((r) => r.id === currentRoom)?.name;
+    ctx.fillText(roomName ? `📍 ${roomName}` : "廊下", 8, canvas.height - 8);
+  }
 }
 
 // --- Game loop ---
 function update() {
-  let nx = px;
-  let ny = py;
-  let moved = false;
+  if (!chatMode) {
+    let nx = px;
+    let ny = py;
+    let moved = false;
 
-  if (keys.has("ArrowUp") || keys.has("w")) { ny -= SPEED; facing = "up"; moved = true; }
-  if (keys.has("ArrowDown") || keys.has("s")) { ny += SPEED; facing = "down"; moved = true; }
-  if (keys.has("ArrowLeft") || keys.has("a")) { nx -= SPEED; facing = "left"; moved = true; }
-  if (keys.has("ArrowRight") || keys.has("d")) { nx += SPEED; facing = "right"; moved = true; }
+    if (keys.has("ArrowUp") || keys.has("w")) { ny -= SPEED; facing = "up"; moved = true; }
+    if (keys.has("ArrowDown") || keys.has("s")) { ny += SPEED; facing = "down"; moved = true; }
+    if (keys.has("ArrowLeft") || keys.has("a")) { nx -= SPEED; facing = "left"; moved = true; }
+    if (keys.has("ArrowRight") || keys.has("d")) { nx += SPEED; facing = "right"; moved = true; }
 
-  if (canMove(nx, py)) px = nx;
-  if (canMove(px, ny)) py = ny;
+    if (canMove(nx, py)) px = nx;
+    if (canMove(px, ny)) py = ny;
 
-  walking = moved;
+    walking = moved;
+  } else {
+    walking = false;
+  }
 
-  // Animate walk cycle (~8fps)
   animTick++;
   if (animTick >= 8) {
     animTick = 0;

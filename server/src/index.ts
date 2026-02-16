@@ -91,6 +91,13 @@ const server = Bun.serve<WsData>({
         players.set(id, player);
         dirty.add(id);
       }
+
+      if (msg.type === "chat") {
+        const chat = JSON.stringify({ type: "chat", id, text: msg.text });
+        for (const s of sockets.values()) {
+          if (s !== ws) s.send(chat);
+        }
+      }
     },
 
     close(ws) {
