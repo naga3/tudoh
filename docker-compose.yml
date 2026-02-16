@@ -1,0 +1,11 @@
+services:
+  client:
+    build:
+      context: ./client
+      target: dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./client/src:/app/src
+      - ./client/index.html:/app/index.html
+      - ./client/vite.config.ts:/app/vite.config.ts

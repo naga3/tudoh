@@ -1,0 +1,13 @@
+{
+  "name": "@tudoh/client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "vite": "^6",
+    "typescript": "^5"
+  }
+}
