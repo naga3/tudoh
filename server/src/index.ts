@@ -5,6 +5,8 @@ type Player = {
   x: number;
   y: number;
   name: string;
+  facing: string;
+  walking: boolean;
 };
 
 type WsData = {
@@ -83,6 +85,8 @@ const server = Bun.serve<WsData>({
           x: msg.x,
           y: msg.y,
           name: msg.name ?? "???",
+          facing: msg.facing ?? "down",
+          walking: msg.walking ?? false,
         };
         players.set(id, player);
         dirty.add(id);
