@@ -1,8 +1,6 @@
 services:
   client:
-    build:
-      context: ./client
-      target: dev
+    build: ./client
     ports:
       - "5173:5173"
     volumes:
