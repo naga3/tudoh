@@ -14,7 +14,7 @@ Gather の代替となるセルフホスト型バーチャルオフィス。
 ## アーキテクチャ
 
 ```
-ブラウザ (Canvas API) ←── WebSocket (位置同期) ──→ Bun サーバー (Socket.IO)
+ブラウザ (Canvas API) ←── WebSocket (位置同期) ──→ Bun サーバー
                       ←── WebRTC (音声 via SFU) ──→ LiveKit (Docker)
 ```
 
@@ -24,7 +24,7 @@ Gather の代替となるセルフホスト型バーチャルオフィス。
 |---------|------|
 | フロント描画 | Canvas API |
 | フロント音声 | LiveKit Client SDK |
-| バックエンド | Bun + Socket.IO |
+| バックエンド | Bun (組み込み WebSocket) |
 | SFU | LiveKit (セルフホスト) |
 | 言語 | TypeScript |
 

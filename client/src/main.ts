@@ -25,7 +25,6 @@ for (const room of rooms) {
       const isBottom = ry === room.y + room.h - 1;
       const isLeft = rx === room.x;
       const isRight = rx === room.x + room.w - 1;
-      // Walls on border, except a doorway at bottom-center
       const isDoor = isBottom && rx === room.x + Math.floor(room.w / 2);
       if ((isTop || isBottom || isLeft || isRight) && !isDoor) {
         map[ry][rx] = 1;
@@ -35,9 +34,13 @@ for (const room of rooms) {
 }
 
 // --- Player ---
+let myId = "";
 let px = 10 * TILE;
 let py = 7 * TILE;
 let currentRoom: string | null = null;
+
+type OtherPlayer = { x: number; y: number; name: string };
+const others = new Map<string, OtherPlayer>();
 
 // --- Input ---
 const keys = new Set<string>();
@@ -50,9 +53,54 @@ canvas.width = MAP_W * TILE;
 canvas.height = MAP_H * TILE;
 const ctx = canvas.getContext("2d")!;
 
+// --- WebSocket ---
+function connect() {
+  const ws = new WebSocket(`ws://${location.hostname}:3000/ws`);
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+
+    if (msg.type === "welcome") {
+      myId = msg.id;
+    }
+
+    if (msg.type === "players") {
+      for (const p of msg.players) {
+        if (p.id !== myId) {
+          others.set(p.id, { x: p.x, y: p.y, name: p.name });
+        }
+      }
+    }
+
+    if (msg.type === "leave") {
+      others.delete(msg.id);
+    }
+  };
+
+  ws.onclose = () => {
+    others.clear();
+    setTimeout(connect, 1000);
+  };
+
+  return ws;
+}
+
+let ws = connect();
+
+// Send position when moving
+let lastSentX = px;
+let lastSentY = py;
+
+function sendPosition() {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  if (px === lastSentX && py === lastSentY) return;
+  lastSentX = px;
+  lastSentY = py;
+  ws.send(JSON.stringify({ type: "move", x: px, y: py, name: "Player" }));
+}
+
 // --- Collision check ---
 function canMove(x: number, y: number): boolean {
-  // Check all 4 corners of the avatar (slightly smaller than a tile)
   const pad = 4;
   const corners = [
     [x + pad, y + pad],
@@ -93,24 +141,30 @@ function draw() {
     }
   }
 
-  // Room areas (highlight)
+  // Room areas
   for (const room of rooms) {
     const isInside = currentRoom === room.id;
     ctx.fillStyle = isInside ? "rgba(100, 200, 100, 0.15)" : "rgba(80, 120, 200, 0.1)";
     ctx.fillRect(room.x * TILE, room.y * TILE, room.w * TILE, room.h * TILE);
-
-    // Room name
     ctx.fillStyle = isInside ? "#8f8" : "#889";
     ctx.font = "12px sans-serif";
     ctx.textAlign = "center";
     ctx.fillText(room.name, (room.x + room.w / 2) * TILE, (room.y + 1) * TILE + 12);
   }
 
-  // Player
+  // Other players
+  for (const [, other] of others) {
+    ctx.fillStyle = "#40a0f0";
+    ctx.fillRect(other.x + 4, other.y + 4, TILE - 8, TILE - 8);
+    ctx.fillStyle = "#adf";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(other.name, other.x + TILE / 2, other.y - 4);
+  }
+
+  // Local player
   ctx.fillStyle = "#f0c040";
   ctx.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
-
-  // Player name
   ctx.fillStyle = "#fff";
   ctx.font = "11px sans-serif";
   ctx.textAlign = "center";
@@ -134,17 +188,15 @@ function update() {
   if (keys.has("ArrowLeft") || keys.has("a")) nx -= SPEED;
   if (keys.has("ArrowRight") || keys.has("d")) nx += SPEED;
 
-  // Try move on each axis independently
   if (canMove(nx, py)) px = nx;
   if (canMove(px, ny)) py = ny;
 
   const newRoom = detectRoom(px, py);
   if (newRoom !== currentRoom) {
-    if (currentRoom) console.log(`退室: ${currentRoom}`);
-    if (newRoom) console.log(`入室: ${newRoom}`);
     currentRoom = newRoom;
   }
 
+  sendPosition();
   draw();
   requestAnimationFrame(update);
 }

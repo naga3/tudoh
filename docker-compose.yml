@@ -7,3 +7,10 @@ services:
       - ./client/src:/app/src
       - ./client/index.html:/app/index.html
       - ./client/vite.config.ts:/app/vite.config.ts
+
+  server:
+    build: ./server
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./server/src:/app/src
