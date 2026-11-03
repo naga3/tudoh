@@ -32,5 +32,5 @@ Gather の代替となるセルフホスト型バーチャルオフィス。
 
 ```sh
 docker compose up --build
-# http://localhost:5173
+# http://localhost:15140
 ```

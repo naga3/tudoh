@@ -2,7 +2,7 @@ services:
   client:
     build: ./client
     ports:
-      - "5173:5173"
+      - "15140:15140"
     volumes:
       - ./client/src:/app/src
       - ./client/public:/app/public
@@ -12,6 +12,6 @@ services:
   server:
     build: ./server
     ports:
-      - "3000:3000"
+      - "15141:15141"
     volumes:
       - ./server/src:/app/src

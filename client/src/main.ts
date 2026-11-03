@@ -150,7 +150,7 @@ ctx.imageSmoothingEnabled = false;
 
 // --- WebSocket ---
 function connect() {
-  const ws = new WebSocket(`ws://${location.hostname}:3000/ws`);
+  const ws = new WebSocket(`ws://${location.hostname}:15141/ws`);
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);

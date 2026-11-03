@@ -39,7 +39,7 @@ setInterval(() => {
 
 // --- Server ---
 const server = Bun.serve<WsData>({
-  port: 3000,
+  port: 15141,
   fetch(req, server) {
     const url = new URL(req.url);
 
